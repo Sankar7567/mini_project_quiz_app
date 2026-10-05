@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QuizForge — Online Technical Quiz Platform</title>
+    <meta
+      name="description"
+      content="Test your technical skills across Data Structures, Algorithms, Web Dev, OS, DBMS, Networks, Software Engineering, Python, Java, and DevOps."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- ── HEADER ─────────────────────────────────────────────── -->
+      <header class="site-header">
+        <div class="header-inner">
+          <a href="#" class="logo" id="logo-link">
+            <div class="logo-icon">⚡</div>
+            <span class="logo-text">QuizForge</span>
+          </a>
+          <nav class="header-nav">
+            <button class="nav-btn active" data-view="home">🏠 Domains</button>
+            <button class="nav-btn" data-view="history">📊 History</button>
+          </nav>
+        </div>
+      </header>
+
+      <!-- ── HOME VIEW — Domain Hub ─────────────────────────────── -->
+      <main id="home-view" class="view active">
+        <div class="container">
+          <div class="section-header">
+            <h1 class="section-title">⚡ QuizForge</h1>
+            <p class="section-subtitle">
+              Master technical concepts across 10 domains with 20 hand-crafted
+              questions each. Track your progress and compete on the leaderboard.
+            </p>
+          </div>
+
+          <!-- Loading State -->
+          <div id="domains-loading" class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Loading domains…</p>
+          </div>
+
+          <!-- Domains Grid -->
+          <div id="domains-grid" class="domains-grid" style="display: none"></div>
+
+          <!-- Error State -->
+          <div id="domains-error" class="empty-state" style="display: none">
+            <div class="empty-state-icon">⚠️</div>
+            <h3>Could not load domains</h3>
+            <p>Make sure the server is running and MongoDB is connected.</p>
+            <button class="btn btn-primary btn-sm" style="margin-top: 16px; width: auto" onclick="loadDomains()">
+              Retry
+            </button>
+          </div>
+        </div>
+      </main>
+
+      <!-- ── QUIZ VIEW ──────────────────────────────────────────── -->
+      <main id="quiz-view" class="view" style="display: none">
+        <!-- Quiz Header -->
+        <div class="quiz-header">
+          <div class="quiz-domain-name">
+            <span id="quiz-domain-icon"></span>
+            <span id="quiz-domain-label"></span>
+          </div>
+          <div class="quiz-info-bar">
+            <div class="quiz-timer" id="quiz-timer">
+              ⏱ <span id="timer-display">30:00</span>
+            </div>
+            <button class="btn btn-danger btn-sm" id="btn-quit-quiz">✕ Quit</button>
+          </div>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="progress-section">
+          <div class="progress-meta">
+            <span class="progress-text">
+              Question <strong id="q-current">1</strong> of
+              <strong id="q-total">20</strong>
+            </span>
+            <span class="progress-pct" id="progress-pct">0%</span>
+          </div>
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="progress-bar" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <!-- Question Card -->
+        <div class="question-card">
+          <div class="question-num" id="question-num">Question 1</div>
+          <p class="question-prompt" id="question-prompt">Loading question…</p>
+        </div>
+
+        <!-- Options -->
+        <div class="options-grid" id="options-grid"></div>
+
+        <!-- Navigation -->
+        <div class="quiz-nav">
+          <div class="quiz-nav-left">
+            <button class="btn btn-secondary btn-sm" id="btn-prev">← Previous</button>
+          </div>
+          <div class="quiz-nav-right">
+            <button class="btn btn-secondary btn-sm" id="btn-next">Next →</button>
+            <button class="btn btn-primary btn-sm" id="btn-submit" style="display: none">
+              Submit Quiz 🚀
+            </button>
+          </div>
+        </div>
+
+        <!-- Question Dots -->
+        <div class="question-dots" id="question-dots"></div>
+      </main>
+
+      <!-- ── RESULT VIEW ─────────────────────────────────────────── -->
+      <main id="result-view" class="view" style="display: none">
+        <!-- Score Hero -->
+        <div class="result-hero">
+          <div class="result-grade-ring">
+            <svg viewBox="0 0 140 140">
+              <circle class="ring-bg" cx="70" cy="70" r="60" />
+              <circle class="ring-fill" id="ring-fill" cx="70" cy="70" r="60" />
+            </svg>
+            <div class="ring-label">
+              <div class="ring-pct" id="result-pct">0%</div>
+              <div class="ring-grade" id="result-grade">—</div>
+            </div>
+          </div>
+
+          <div class="result-score" id="result-score">0 / 20</div>
+          <div class="result-label" id="result-label">—</div>
+
+          <div class="result-stats-row">
+            <div class="stat-pill correct">
+              ✅ <span id="result-correct">0 Correct</span>
+            </div>
+            <div class="stat-pill wrong">
+              ❌ <span id="result-wrong">0 Wrong</span>
+            </div>
+            <div class="stat-pill time">
+              ⏱ <span id="result-time">0s</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Review Section -->
+        <div class="review-section">
+          <h2 class="review-heading">📋 Answer Review</h2>
+          <div id="review-list"></div>
+        </div>
+
+        <!-- Actions -->
+        <div class="result-actions">
+          <button class="btn btn-primary" id="btn-retake">🔄 Retake Quiz</button>
+          <button class="btn btn-secondary" id="btn-back-home">🏠 All Domains</button>
+          <button class="btn btn-secondary" id="btn-view-history">📊 My History</button>
+        </div>
+      </main>
+
+      <!-- ── HISTORY VIEW ─────────────────────────────────────────── -->
+      <main id="history-view" class="view" style="display: none">
+        <div class="section-header">
+          <h1 class="section-title">📊 Quiz History</h1>
+          <p class="section-subtitle">
+            Enter your Roll Number to view past quiz attempts and performance stats.
+          </p>
+        </div>
+
+        <div class="history-search-bar">
+          <input
+            type="text"
+            class="form-input"
+            id="history-roll-input"
+            placeholder="Enter Roll Number (e.g. CS2024001)"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button class="btn btn-primary" id="btn-search-history" style="width: auto; padding: 12px 24px">
+            🔍 Search
+          </button>
+        </div>
+
+        <!-- Stats Cards -->
+        <div id="history-stats" style="display: none">
+          <div class="history-stats-grid" id="stats-grid"></div>
+        </div>
+
+        <!-- History Table -->
+        <div id="history-content">
+          <div class="empty-state">
+            <div class="empty-state-icon">🔍</div>
+            <h3>No results yet</h3>
+            <p>Enter your Roll Number above to fetch your quiz history.</p>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- ── STUDENT REGISTRATION MODAL ─────────────────────────── -->
+    <div class="modal-overlay" id="register-overlay">
+      <div class="modal">
+        <button class="modal-close" id="modal-close-btn" aria-label="Close">✕</button>
+        <div style="font-size: 2rem; margin-bottom: 12px" id="modal-domain-icon">🗂️</div>
+        <h2 class="modal-title">Start Quiz</h2>
+        <p class="modal-subtitle" id="modal-domain-subtitle">
+          Enter your details to begin the quiz.
+        </p>
+
+        <form id="register-form" novalidate>
+          <div class="form-group">
+            <label class="form-label" for="input-name">Full Name</label>
+            <input
+              type="text"
+              id="input-name"
+              class="form-input"
+              placeholder="e.g. Arun Kumar"
+              maxlength="100"
+              autocomplete="name"
+            />
+            <p class="form-error" id="err-name">Please enter your full name.</p>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="input-roll">Roll Number</label>
+            <input
+              type="text"
+              id="input-roll"
+              class="form-input"
+              placeholder="e.g. CS2024001"
+              maxlength="20"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <p class="form-error" id="err-roll">
+              Please enter a valid roll number (alphanumeric, 3–20 chars).
+            </p>
+          </div>
+
+          <button type="submit" class="btn btn-primary">
+            🚀 Begin Quiz
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- ── CONFIRM QUIT MODAL ──────────────────────────────────── -->
+    <div class="modal-overlay" id="confirm-overlay">
+      <div class="modal">
+        <div class="confirm-icon">⚠️</div>
+        <h2 class="confirm-title">Quit Quiz?</h2>
+        <p class="confirm-message">
+          Your progress will be lost. Are you sure you want to quit this quiz?
+        </p>
+        <div class="confirm-actions">
+          <button class="btn btn-secondary" style="flex: 1" id="btn-confirm-cancel">
+            Keep Going
+          </button>
+          <button class="btn btn-danger" style="flex: 1" id="btn-confirm-quit">
+            Yes, Quit
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── TOAST CONTAINER ────────────────────────────────────── -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- ── APP JAVASCRIPT ─────────────────────────────────────── -->
+    <script src="app.js"></script>
+  </body>
+</html>

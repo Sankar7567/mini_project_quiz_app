@@ -19,9 +19,10 @@ const state = {
   rollNumber: '',
   quizStartTime: null,
   timerInterval: null,
-  timerSeconds: 30 * 60,   // 30 minutes default
+  timerSeconds: 30 * 60,   // default 30 minutes
   isQuizActive: false,
   lastResult: null,
+  isSubmitting: false,
 };
 
 /* ================================================================
@@ -36,12 +37,14 @@ const state = {
  */
 function showToast(message, type = 'info', duration = 3500) {
   const container = document.getElementById('toast-container');
+  if (!container) return;
+
   const icons = { success: '✅', error: '❌', info: 'ℹ️' };
 
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
   toast.innerHTML = `
-    <span class="toast-icon">${icons[type]}</span>
+    <span class="toast-icon">${icons[type] || 'ℹ️'}</span>
     <span class="toast-message">${escapeHtml(message)}</span>
   `;
 
@@ -59,6 +62,7 @@ function showToast(message, type = 'info', duration = 3500) {
  * Escape HTML to prevent XSS
  */
 function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
   return String(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -71,8 +75,9 @@ function escapeHtml(str) {
  * Format seconds into mm:ss
  */
 function formatTime(seconds) {
+  if (isNaN(seconds) || seconds < 0) seconds = 0;
   const m = Math.floor(seconds / 60).toString().padStart(2, '0');
-  const s = (seconds % 60).toString().padStart(2, '0');
+  const s = Math.floor(seconds % 60).toString().padStart(2, '0');
   return `${m}:${s}`;
 }
 
@@ -80,7 +85,11 @@ function formatTime(seconds) {
  * Format date to a readable string
  */
 function formatDate(dateStr) {
-  return new Date(dateStr).toLocaleString('en-IN', {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '—';
+
+  return d.toLocaleString('en-IN', {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
@@ -118,6 +127,7 @@ const views = {
 
 function showView(viewName) {
   Object.entries(views).forEach(([name, el]) => {
+    if (!el) return;
     if (name === viewName) {
       el.style.display = 'block';
       el.classList.add('active');
@@ -142,12 +152,14 @@ function showView(viewName) {
 
 function openModal(id) {
   const overlay = document.getElementById(id);
+  if (!overlay) return;
   overlay.classList.add('active');
   document.body.style.overflow = 'hidden';
 }
 
 function closeModal(id) {
   const overlay = document.getElementById(id);
+  if (!overlay) return;
   overlay.classList.remove('active');
   document.body.style.overflow = '';
 }
@@ -161,32 +173,33 @@ async function loadDomains() {
   const loading = document.getElementById('domains-loading');
   const error = document.getElementById('domains-error');
 
-  loading.style.display = 'flex';
-  grid.style.display = 'none';
-  error.style.display = 'none';
+  if (loading) loading.style.display = 'flex';
+  if (grid) grid.style.display = 'none';
+  if (error) error.style.display = 'none';
 
   try {
     const data = await apiFetch('/domains');
-    state.domains = data.data;
+    state.domains = data.data || [];
 
-    loading.style.display = 'none';
+    if (loading) loading.style.display = 'none';
     renderDomains(state.domains);
-    grid.style.display = 'grid';
+    if (grid) grid.style.display = 'grid';
   } catch (err) {
-    loading.style.display = 'none';
-    error.style.display = 'block';
+    if (loading) loading.style.display = 'none';
+    if (error) error.style.display = 'block';
     showToast(`Failed to load domains: ${err.message}`, 'error');
   }
 }
 
 function renderDomains(domains) {
   const grid = document.getElementById('domains-grid');
+  if (!grid) return;
 
-  grid.innerHTML = domains
+  grid.innerHTML = (domains || [])
     .map(
       (domain) => `
-    <div class="domain-card" data-id="${domain._id}" style="--card-color: ${domain.color}">
-      <div class="domain-icon">${domain.icon}</div>
+    <div class="domain-card" data-id="${domain._id}" style="--card-color: ${domain.color || '#6c63ff'}">
+      <div class="domain-icon">${domain.icon || '📚'}</div>
       <div class="domain-info">
         <h3 class="domain-name">${escapeHtml(domain.name)}</h3>
         <p class="domain-desc">${escapeHtml(domain.description)}</p>
@@ -194,7 +207,7 @@ function renderDomains(domains) {
       <div class="domain-meta">
         <div class="domain-badge">
           <div class="badge-dot"></div>
-          ${domain.questionCount} Questions · ${domain.difficulty}
+          ${domain.questionCount || 20} Questions · ${domain.difficulty || 'Intermediate'}
         </div>
         <button class="btn-start" data-id="${domain._id}">Start →</button>
       </div>
@@ -204,7 +217,7 @@ function renderDomains(domains) {
     .join('');
 
   // Event delegation for domain card clicks
-  grid.addEventListener('click', (e) => {
+  grid.onclick = (e) => {
     const startBtn = e.target.closest('.btn-start');
     const card = e.target.closest('.domain-card');
 
@@ -213,7 +226,7 @@ function renderDomains(domains) {
       const domain = state.domains.find((d) => d._id === domainId);
       if (domain) openRegistrationModal(domain);
     }
-  });
+  };
 }
 
 /* ================================================================
@@ -223,52 +236,64 @@ function renderDomains(domains) {
 function openRegistrationModal(domain) {
   state.currentDomain = domain;
 
-  document.getElementById('modal-domain-icon').textContent = domain.icon;
-  document.getElementById('modal-domain-subtitle').textContent =
-    `${domain.name} · ${domain.questionCount} Questions · 30 minutes`;
+  const iconEl = document.getElementById('modal-domain-icon');
+  if (iconEl) iconEl.textContent = domain.icon || '📚';
+
+  const subtitleEl = document.getElementById('modal-domain-subtitle');
+  if (subtitleEl) {
+    subtitleEl.textContent = `${domain.name} · ${domain.questionCount || 20} Questions · 30 minutes`;
+  }
 
   // Pre-fill if we have saved data
-  document.getElementById('input-name').value = state.studentName;
-  document.getElementById('input-roll').value = state.rollNumber;
+  const nameInput = document.getElementById('input-name');
+  const rollInput = document.getElementById('input-roll');
+  if (nameInput) nameInput.value = state.studentName;
+  if (rollInput) rollInput.value = state.rollNumber;
 
   // Clear errors
-  document.getElementById('err-name').classList.remove('visible');
-  document.getElementById('err-roll').classList.remove('visible');
+  const errName = document.getElementById('err-name');
+  const errRoll = document.getElementById('err-roll');
+  if (errName) errName.classList.remove('visible');
+  if (errRoll) errRoll.classList.remove('visible');
 
   openModal('register-overlay');
 
   // Focus first empty field
   setTimeout(() => {
-    const nameInput = document.getElementById('input-name');
-    const rollInput = document.getElementById('input-roll');
-    (nameInput.value ? rollInput : nameInput).focus();
+    if (nameInput && rollInput) {
+      (nameInput.value ? rollInput : nameInput).focus();
+    }
   }, 150);
 }
 
 function validateRegistrationForm() {
-  const name = document.getElementById('input-name').value.trim();
-  const roll = document.getElementById('input-roll').value.trim();
+  const nameInput = document.getElementById('input-name');
+  const rollInput = document.getElementById('input-roll');
+  const name = nameInput ? nameInput.value.trim() : '';
+  const roll = rollInput ? rollInput.value.trim() : '';
 
   let valid = true;
 
+  const errName = document.getElementById('err-name');
   if (!name || name.length < 2) {
-    document.getElementById('err-name').classList.add('visible');
+    if (errName) errName.classList.add('visible');
     valid = false;
   } else {
-    document.getElementById('err-name').classList.remove('visible');
+    if (errName) errName.classList.remove('visible');
   }
 
+  const errRoll = document.getElementById('err-roll');
   if (!roll || !/^[a-zA-Z0-9]{3,20}$/.test(roll)) {
-    document.getElementById('err-roll').classList.add('visible');
+    if (errRoll) errRoll.classList.add('visible');
     valid = false;
   } else {
-    document.getElementById('err-roll').classList.remove('visible');
+    if (errRoll) errRoll.classList.remove('visible');
   }
 
   return valid ? { name, roll } : null;
 }
 
-document.getElementById('register-form').addEventListener('submit', async (e) => {
+document.getElementById('register-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const formData = validateRegistrationForm();
   if (!formData) return;
@@ -280,7 +305,7 @@ document.getElementById('register-form').addEventListener('submit', async (e) =>
   await startQuiz(state.currentDomain);
 });
 
-document.getElementById('modal-close-btn').addEventListener('click', () => {
+document.getElementById('modal-close-btn')?.addEventListener('click', () => {
   closeModal('register-overlay');
 });
 
@@ -292,12 +317,25 @@ async function startQuiz(domain) {
   showView('quiz');
 
   // Show loading state
-  document.getElementById('question-prompt').textContent = 'Loading questions…';
-  document.getElementById('options-grid').innerHTML = `
-    <div class="loading-spinner" style="padding: 40px 0">
-      <div class="spinner"></div>
-    </div>
-  `;
+  const promptEl = document.getElementById('question-prompt');
+  if (promptEl) promptEl.textContent = 'Loading questions…';
+
+  const gridEl = document.getElementById('options-grid');
+  if (gridEl) {
+    gridEl.innerHTML = `
+      <div class="loading-spinner" style="padding: 40px 0">
+        <div class="spinner"></div>
+      </div>
+    `;
+  }
+
+  // Reset submit button state
+  const submitBtn = document.getElementById('btn-submit');
+  if (submitBtn) {
+    submitBtn.textContent = 'Submit Quiz 🚀';
+    submitBtn.disabled = false;
+  }
+  state.isSubmitting = false;
 
   try {
     const data = await apiFetch(`/domains/${domain._id}/questions`);
@@ -314,9 +352,14 @@ async function startQuiz(domain) {
     state.timerSeconds = data.data.length * 90; // 90s per question
 
     // Setup UI
-    document.getElementById('quiz-domain-icon').textContent = domain.icon;
-    document.getElementById('quiz-domain-label').textContent = domain.name;
-    document.getElementById('q-total').textContent = data.data.length;
+    const domainIconEl = document.getElementById('quiz-domain-icon');
+    if (domainIconEl) domainIconEl.textContent = domain.icon || '📚';
+
+    const domainLabelEl = document.getElementById('quiz-domain-label');
+    if (domainLabelEl) domainLabelEl.textContent = domain.name;
+
+    const qTotalEl = document.getElementById('q-total');
+    if (qTotalEl) qTotalEl.textContent = data.data.length;
 
     buildQuestionDots(data.data.length);
     renderQuestion(0);
@@ -331,6 +374,8 @@ async function startQuiz(domain) {
 
 function buildQuestionDots(count) {
   const container = document.getElementById('question-dots');
+  if (!container) return;
+
   container.innerHTML = Array.from(
     { length: count },
     (_, i) => `
@@ -340,12 +385,12 @@ function buildQuestionDots(count) {
   `
   ).join('');
 
-  container.addEventListener('click', (e) => {
+  container.onclick = (e) => {
     const dot = e.target.closest('.q-dot');
     if (dot) {
-      navigateToQuestion(parseInt(dot.dataset.index));
+      navigateToQuestion(parseInt(dot.dataset.index, 10));
     }
-  });
+  };
 }
 
 function updateDots() {
@@ -361,49 +406,65 @@ function updateDots() {
 }
 
 function renderQuestion(index) {
+  if (!state.currentQuestions || state.currentQuestions.length === 0) return;
   const q = state.currentQuestions[index];
+  if (!q) return;
+
   const total = state.currentQuestions.length;
 
   // Progress
-  const pct = Math.round((index / total) * 100);
-  document.getElementById('q-current').textContent = index + 1;
-  document.getElementById('progress-pct').textContent = `${pct}%`;
-  document.getElementById('progress-bar').style.width = `${pct}%`;
+  const pct = Math.round(((index + 1) / total) * 100);
+  const qCurrentEl = document.getElementById('q-current');
+  if (qCurrentEl) qCurrentEl.textContent = index + 1;
 
-  // Question
-  document.getElementById('question-num').textContent = `Question ${index + 1}`;
-  document.getElementById('question-prompt').textContent = q.prompt;
+  const pctEl = document.getElementById('progress-pct');
+  if (pctEl) pctEl.textContent = `${pct}%`;
+
+  const barEl = document.getElementById('progress-bar');
+  if (barEl) barEl.style.width = `${pct}%`;
+
+  // Question Prompt
+  const numEl = document.getElementById('question-num');
+  if (numEl) numEl.textContent = `Question ${index + 1}`;
+
+  const promptEl = document.getElementById('question-prompt');
+  if (promptEl) promptEl.textContent = q.prompt;
 
   // Options
   const letters = ['A', 'B', 'C', 'D', 'E', 'F'];
   const savedAnswer = state.answers[index];
-  const optionsHtml = q.options
+  const optionsHtml = (q.options || [])
     .map((opt, i) => {
       const isSelected = savedAnswer === i;
+      const optText = typeof opt === 'string' ? opt : opt.text;
       return `
       <button class="option-btn ${isSelected ? 'selected' : ''}" data-option="${i}">
-        <div class="option-letter">${letters[i]}</div>
-        <div class="option-text">${escapeHtml(opt.text)}</div>
+        <div class="option-letter">${letters[i] || i + 1}</div>
+        <div class="option-text">${escapeHtml(optText)}</div>
       </button>
     `;
     })
     .join('');
 
-  document.getElementById('options-grid').innerHTML = optionsHtml;
-
-  // Add option click handlers
-  document.querySelectorAll('.option-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      selectOption(parseInt(btn.dataset.option));
+  const gridEl = document.getElementById('options-grid');
+  if (gridEl) {
+    gridEl.innerHTML = optionsHtml;
+    gridEl.querySelectorAll('.option-btn').forEach((btn) => {
+      btn.onclick = () => selectOption(parseInt(btn.dataset.option, 10));
     });
-  });
+  }
 
   // Navigation buttons
-  document.getElementById('btn-prev').disabled = index === 0;
-  document.getElementById('btn-next').style.display =
-    index === total - 1 ? 'none' : 'inline-flex';
-  document.getElementById('btn-submit').style.display =
-    index === total - 1 ? 'inline-flex' : 'none';
+  const prevBtn = document.getElementById('btn-prev');
+  if (prevBtn) prevBtn.disabled = index === 0;
+
+  const nextBtn = document.getElementById('btn-next');
+  if (nextBtn) nextBtn.style.display = index === total - 1 ? 'none' : 'inline-flex';
+
+  const submitBtn = document.getElementById('btn-submit');
+  if (submitBtn) {
+    submitBtn.style.display = index === total - 1 ? 'inline-flex' : 'none';
+  }
 
   updateDots();
 }
@@ -411,7 +472,7 @@ function renderQuestion(index) {
 function selectOption(optionIndex) {
   state.answers[state.currentQuestionIndex] = optionIndex;
 
-  // Update UI
+  // Update UI selection
   document.querySelectorAll('.option-btn').forEach((btn, i) => {
     btn.classList.toggle('selected', i === optionIndex);
   });
@@ -434,10 +495,10 @@ function startTimer() {
 
   const tick = () => {
     state.timerSeconds--;
-    display.textContent = formatTime(state.timerSeconds);
+    if (display) display.textContent = formatTime(state.timerSeconds);
 
     const warningThreshold = state.currentQuestions.length * 15; // 15s/q
-    if (state.timerSeconds <= warningThreshold) {
+    if (timerEl && state.timerSeconds <= warningThreshold) {
       timerEl.classList.add('warning');
     }
 
@@ -448,7 +509,7 @@ function startTimer() {
     }
   };
 
-  display.textContent = formatTime(state.timerSeconds);
+  if (display) display.textContent = formatTime(state.timerSeconds);
   state.timerInterval = setInterval(tick, 1000);
 }
 
@@ -458,15 +519,17 @@ function stopTimer() {
 }
 
 // Quiz navigation buttons
-document.getElementById('btn-prev').addEventListener('click', () => {
+document.getElementById('btn-prev')?.addEventListener('click', () => {
   navigateToQuestion(state.currentQuestionIndex - 1);
 });
 
-document.getElementById('btn-next').addEventListener('click', () => {
+document.getElementById('btn-next')?.addEventListener('click', () => {
   navigateToQuestion(state.currentQuestionIndex + 1);
 });
 
-document.getElementById('btn-submit').addEventListener('click', () => {
+document.getElementById('btn-submit')?.addEventListener('click', () => {
+  if (state.isSubmitting) return;
+
   const answeredCount = Object.keys(state.answers).length;
   const total = state.currentQuestions.length;
 
@@ -481,16 +544,16 @@ document.getElementById('btn-submit').addEventListener('click', () => {
   submitQuiz(false);
 });
 
-// Quit quiz
-document.getElementById('btn-quit-quiz').addEventListener('click', () => {
+// Quit quiz modal controls
+document.getElementById('btn-quit-quiz')?.addEventListener('click', () => {
   openModal('confirm-overlay');
 });
 
-document.getElementById('btn-confirm-cancel').addEventListener('click', () => {
+document.getElementById('btn-confirm-cancel')?.addEventListener('click', () => {
   closeModal('confirm-overlay');
 });
 
-document.getElementById('btn-confirm-quit').addEventListener('click', () => {
+document.getElementById('btn-confirm-quit')?.addEventListener('click', () => {
   closeModal('confirm-overlay');
   stopTimer();
   state.isQuizActive = false;
@@ -503,21 +566,32 @@ document.getElementById('btn-confirm-quit').addEventListener('click', () => {
    ================================================================ */
 
 async function submitQuiz(autoSubmit = false) {
+  if (state.isSubmitting) return;
+  state.isSubmitting = true;
+
   stopTimer();
   state.isQuizActive = false;
 
-  const timeTaken = Math.round((Date.now() - state.quizStartTime) / 1000);
+  const timeTaken = Math.max(
+    1,
+    Math.round((Date.now() - (state.quizStartTime || Date.now())) / 1000)
+  );
 
   // Build answers array (fill skipped with -1)
-  const answersPayload = state.currentQuestions.map((q, i) => ({
+  const answersPayload = (state.currentQuestions || []).map((q, i) => ({
     questionId: q._id,
     selectedOptionIndex:
       state.answers[i] !== undefined ? state.answers[i] : -1,
   }));
 
-  // Show submitting state
-  document.getElementById('btn-submit').textContent = 'Submitting…';
-  document.getElementById('btn-submit').disabled = true;
+  // Update button state
+  const submitBtn = document.getElementById('btn-submit');
+  if (submitBtn) {
+    submitBtn.textContent = 'Submitting…';
+    submitBtn.disabled = true;
+  }
+
+  let submissionResult = null;
 
   try {
     const data = await apiFetch('/quiz/submit', {
@@ -525,23 +599,40 @@ async function submitQuiz(autoSubmit = false) {
       body: JSON.stringify({
         studentName: state.studentName,
         rollNumber: state.rollNumber,
-        domainId: state.currentDomain._id,
+        domainId: state.currentDomain ? state.currentDomain._id : '',
         answers: answersPayload,
         timeTaken,
       }),
     });
 
+    submissionResult = data.data;
     state.lastResult = data.data;
-    renderResult(data.data);
-    showView('result');
+  } catch (err) {
+    showToast(`Submission failed: ${err.message}`, 'error');
+    if (submitBtn) {
+      submitBtn.textContent = 'Submit Quiz 🚀';
+      submitBtn.disabled = false;
+    }
+    state.isSubmitting = false;
+    return;
+  }
 
+  // Render results cleanly
+  try {
+    renderResult(submissionResult);
+    showView('result');
     if (autoSubmit) {
       showToast('Quiz auto-submitted due to time limit!', 'info');
     }
-  } catch (err) {
-    showToast(`Submission failed: ${err.message}`, 'error');
-    document.getElementById('btn-submit').textContent = 'Submit Quiz 🚀';
-    document.getElementById('btn-submit').disabled = false;
+  } catch (renderErr) {
+    console.error('Error rendering result view:', renderErr);
+    showView('result');
+  } finally {
+    if (submitBtn) {
+      submitBtn.textContent = 'Submit Quiz 🚀';
+      submitBtn.disabled = false;
+    }
+    state.isSubmitting = false;
   }
 }
 
@@ -550,31 +641,47 @@ async function submitQuiz(autoSubmit = false) {
    ================================================================ */
 
 function renderResult(result) {
-  const { score, totalQuestions, percentage, grade, timeTaken, answers, domainName } = result;
+  if (!result) return;
+  const {
+    score = 0,
+    totalQuestions = 0,
+    percentage = 0,
+    grade = 'F',
+    timeTaken = 0,
+    answers = [],
+  } = result;
 
-  // Score ring
+  // Score ring animation
   const circumference = 2 * Math.PI * 60; // r=60
   const ring = document.getElementById('ring-fill');
-  ring.style.strokeDasharray = circumference;
+  if (ring) {
+    ring.style.strokeDasharray = `${circumference}`;
 
-  // Animate ring after a tick
-  requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      const offset = circumference - (percentage / 100) * circumference;
-      ring.style.strokeDashoffset = offset;
+      requestAnimationFrame(() => {
+        const offset =
+          circumference - ((percentage || 0) / 100) * circumference;
+        ring.style.strokeDashoffset = `${offset}`;
+      });
     });
-  });
 
-  // Ring color based on grade
-  ring.className = 'ring-fill';
-  if (percentage >= 75) ring.classList.add('success');
-  else if (percentage >= 50) ring.classList.add('warning');
-  else ring.classList.add('danger');
+    // Use setAttribute('class', ...) for SVG elements to avoid getter-only error!
+    let ringClass = 'ring-fill';
+    if (percentage >= 75) ringClass += ' success';
+    else if (percentage >= 50) ringClass += ' warning';
+    else ringClass += ' danger';
+    ring.setAttribute('class', ringClass);
+  }
 
-  // Text
-  document.getElementById('result-pct').textContent = `${percentage}%`;
-  document.getElementById('result-grade').textContent = grade;
-  document.getElementById('result-score').textContent = `${score} / ${totalQuestions}`;
+  // Text Elements
+  const pctEl = document.getElementById('result-pct');
+  if (pctEl) pctEl.textContent = `${percentage}%`;
+
+  const gradeEl = document.getElementById('result-grade');
+  if (gradeEl) gradeEl.textContent = grade;
+
+  const scoreEl = document.getElementById('result-score');
+  if (scoreEl) scoreEl.textContent = `${score} / ${totalQuestions}`;
 
   const labels = {
     'A+': '🏆 Outstanding! Perfect-near performance!',
@@ -585,33 +692,46 @@ function renderResult(result) {
     D: '💪 Below average. More practice needed.',
     F: '❗ Needs significant improvement.',
   };
-  document.getElementById('result-label').textContent =
-    labels[grade] || 'Quiz Complete!';
 
-  const correct = answers.filter((a) => a.isCorrect).length;
-  const wrong = answers.filter((a) => !a.isCorrect).length;
+  const labelEl = document.getElementById('result-label');
+  if (labelEl) labelEl.textContent = labels[grade] || 'Quiz Complete!';
 
-  document.getElementById('result-correct').textContent = `${correct} Correct`;
-  document.getElementById('result-wrong').textContent = `${wrong} Wrong`;
-  document.getElementById('result-time').textContent = formatTime(timeTaken);
+  const correct = (answers || []).filter((a) => a && a.isCorrect).length;
+  const wrong = (answers || []).filter((a) => a && !a.isCorrect).length;
 
-  // Review list (show all — correct collapsed, wrong expanded)
+  const correctEl = document.getElementById('result-correct');
+  if (correctEl) correctEl.textContent = `${correct} Correct`;
+
+  const wrongEl = document.getElementById('result-wrong');
+  if (wrongEl) wrongEl.textContent = `${wrong} Wrong`;
+
+  const timeEl = document.getElementById('result-time');
+  if (timeEl) timeEl.textContent = formatTime(timeTaken);
+
+  // Review List
   const reviewList = document.getElementById('review-list');
+  if (!reviewList) return;
+
   const letters = ['A', 'B', 'C', 'D', 'E', 'F'];
 
   if (!answers || answers.length === 0) {
-    reviewList.innerHTML = '<p style="color: var(--text-secondary);">No answer details available.</p>';
+    reviewList.innerHTML =
+      '<p style="color: var(--text-secondary);">No answer details available.</p>';
     return;
   }
 
   reviewList.innerHTML = answers
     .map((ans, i) => {
-      const isCorrect = ans.isCorrect;
-      const userIdx = ans.selectedOptionIndex;
-      const correctIdx = ans.correctOptionIndex;
+      if (!ans) return '';
+      const isCorrect = !!ans.isCorrect;
+      const userIdx =
+        ans.selectedOptionIndex !== undefined ? ans.selectedOptionIndex : -1;
+      const correctIdx =
+        ans.correctOptionIndex !== undefined ? ans.correctOptionIndex : 0;
+      const options = Array.isArray(ans.options) ? ans.options : [];
 
       let userAnswerHtml = '';
-      if (userIdx === -1) {
+      if (userIdx === -1 || userIdx === null || userIdx < 0) {
         userAnswerHtml = `
           <div class="review-answer user-wrong">
             <span class="answer-icon">⏭️</span>
@@ -619,38 +739,45 @@ function renderResult(result) {
           </div>
         `;
       } else if (!isCorrect) {
+        const letter = letters[userIdx] || `Option ${userIdx + 1}`;
+        const text = options[userIdx] || '';
         userAnswerHtml = `
           <div class="review-answer user-wrong">
             <span class="answer-icon">❌</span>
-            <span>Your answer: <strong>${letters[userIdx]}. ${escapeHtml(ans.options[userIdx] || '')}</strong></span>
+            <span>Your answer: <strong>${letter}. ${escapeHtml(text)}</strong></span>
           </div>
         `;
       } else {
+        const letter = letters[userIdx] || `Option ${userIdx + 1}`;
+        const text = options[userIdx] || '';
         userAnswerHtml = `
           <div class="review-answer user-correct">
             <span class="answer-icon">✅</span>
-            <span>Your answer: <strong>${letters[userIdx]}. ${escapeHtml(ans.options[userIdx] || '')}</strong></span>
+            <span>Your answer: <strong>${letter}. ${escapeHtml(text)}</strong></span>
           </div>
         `;
       }
 
+      const correctLetter = letters[correctIdx] || `Option ${correctIdx + 1}`;
+      const correctText = options[correctIdx] || '';
       const correctHtml = !isCorrect
         ? `<div class="review-answer correct-answer">
             <span class="answer-icon">✔️</span>
-            <span>Correct: <strong>${letters[correctIdx]}. ${escapeHtml(ans.options[correctIdx] || '')}</strong></span>
+            <span>Correct: <strong>${correctLetter}. ${escapeHtml(correctText)}</strong></span>
           </div>`
         : '';
 
-      const explanationHtml = (!isCorrect && ans.explanation)
-        ? `<div class="review-explanation">
-            <strong>💡 Explanation:</strong> ${escapeHtml(ans.explanation)}
-          </div>`
-        : '';
+      const explanationHtml =
+        !isCorrect && ans.explanation
+          ? `<div class="review-explanation">
+              <strong>💡 Explanation:</strong> ${escapeHtml(ans.explanation)}
+            </div>`
+          : '';
 
       return `
         <div class="review-item ${isCorrect ? 'correct-item' : 'wrong-item'}">
           <div class="review-q-num">Q${i + 1} · ${isCorrect ? 'Correct ✅' : 'Incorrect ❌'}</div>
-          <p class="review-prompt">${escapeHtml(ans.prompt)}</p>
+          <p class="review-prompt">${escapeHtml(ans.prompt || '')}</p>
           <div class="review-answers">
             ${userAnswerHtml}
             ${correctHtml}
@@ -663,20 +790,25 @@ function renderResult(result) {
 }
 
 // Result action buttons
-document.getElementById('btn-retake').addEventListener('click', async () => {
+document.getElementById('btn-retake')?.addEventListener('click', async () => {
   if (state.currentDomain) {
     await startQuiz(state.currentDomain);
+  } else {
+    showView('home');
   }
 });
 
-document.getElementById('btn-back-home').addEventListener('click', () => {
+document.getElementById('btn-back-home')?.addEventListener('click', () => {
   showView('home');
 });
 
-document.getElementById('btn-view-history').addEventListener('click', () => {
+document.getElementById('btn-view-history')?.addEventListener('click', () => {
   showView('history');
-  document.getElementById('history-roll-input').value = state.rollNumber;
-  if (state.rollNumber) searchHistory(state.rollNumber);
+  const rollInput = document.getElementById('history-roll-input');
+  if (rollInput) {
+    rollInput.value = state.rollNumber;
+    if (state.rollNumber) searchHistory(state.rollNumber);
+  }
 });
 
 /* ================================================================
@@ -687,49 +819,57 @@ async function searchHistory(rollNumber) {
   const content = document.getElementById('history-content');
   const statsSection = document.getElementById('history-stats');
 
-  content.innerHTML = `
-    <div class="loading-spinner" style="padding: 48px 0">
-      <div class="spinner"></div>
-      <p>Fetching history for ${escapeHtml(rollNumber)}…</p>
-    </div>
-  `;
-  statsSection.style.display = 'none';
+  if (content) {
+    content.innerHTML = `
+      <div class="loading-spinner" style="padding: 48px 0">
+        <div class="spinner"></div>
+        <p>Fetching history for ${escapeHtml(rollNumber)}…</p>
+      </div>
+    `;
+  }
+  if (statsSection) statsSection.style.display = 'none';
 
   try {
     const data = await apiFetch(`/quiz/history/${encodeURIComponent(rollNumber)}`);
 
-    if (data.count === 0) {
-      content.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-state-icon">🔍</div>
-          <h3>No history found</h3>
-          <p>No quiz attempts found for roll number <strong>${escapeHtml(rollNumber)}</strong>.</p>
-        </div>
-      `;
+    if (!data.data || data.data.length === 0) {
+      if (content) {
+        content.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">🔍</div>
+            <h3>No history found</h3>
+            <p>No quiz attempts found for roll number <strong>${escapeHtml(rollNumber)}</strong>.</p>
+          </div>
+        `;
+      }
       return;
     }
 
     // Stats
     const { stats, data: attempts } = data;
-    statsSection.style.display = 'block';
-    document.getElementById('stats-grid').innerHTML = `
-      <div class="stat-card">
-        <div class="stat-card-value">${stats.totalAttempts}</div>
-        <div class="stat-card-label">Total Attempts</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-card-value">${stats.averagePercentage}%</div>
-        <div class="stat-card-label">Average Score</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-card-value">${stats.bestPercentage}%</div>
-        <div class="stat-card-label">Best Score</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-card-value">${stats.uniqueDomainsAttempted}</div>
-        <div class="stat-card-label">Domains Attempted</div>
-      </div>
-    `;
+    if (statsSection) statsSection.style.display = 'block';
+
+    const statsGrid = document.getElementById('stats-grid');
+    if (statsGrid && stats) {
+      statsGrid.innerHTML = `
+        <div class="stat-card">
+          <div class="stat-card-value">${stats.totalAttempts || 0}</div>
+          <div class="stat-card-label">Total Attempts</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-value">${stats.averagePercentage || 0}%</div>
+          <div class="stat-card-label">Average Score</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-value">${stats.bestPercentage || 0}%</div>
+          <div class="stat-card-label">Best Score</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-value">${stats.uniqueDomainsAttempted || 0}</div>
+          <div class="stat-card-label">Domains Attempted</div>
+        </div>
+      `;
+    }
 
     // Table
     const gradeClass = (g) => `grade-${(g || 'F').replace('+', '-plus')}`;
@@ -739,72 +879,77 @@ async function searchHistory(rollNumber) {
       return 'var(--accent-danger)';
     };
 
-    content.innerHTML = `
-      <div class="history-table-wrapper">
-        <table class="history-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Domain</th>
-              <th>Score</th>
-              <th>Performance</th>
-              <th>Grade</th>
-              <th>Time Taken</th>
-              <th>Date</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${attempts
-              .map(
-                (a, i) => `
+    if (content) {
+      content.innerHTML = `
+        <div class="history-table-wrapper">
+          <table class="history-table">
+            <thead>
               <tr>
-                <td style="color: var(--text-muted)">${i + 1}</td>
-                <td style="font-weight: 600">${escapeHtml(a.domainName || '—')}</td>
-                <td style="font-family: var(--font-mono)">${a.score} / ${a.totalQuestions}</td>
-                <td>
-                  <div class="score-bar">
-                    <div class="score-bar-track">
-                      <div class="score-bar-fill" style="width: ${a.percentage}%; background: ${barColor(a.percentage)}"></div>
-                    </div>
-                    <span style="font-size: 0.8rem; color: var(--text-secondary); white-space: nowrap">${a.percentage}%</span>
-                  </div>
-                </td>
-                <td><span class="grade-badge ${gradeClass(a.grade)}">${a.grade}</span></td>
-                <td style="color: var(--text-secondary); font-family: var(--font-mono)">${formatTime(a.timeTaken || 0)}</td>
-                <td style="color: var(--text-muted); font-size: 0.8rem; white-space: nowrap">${formatDate(a.completedAt)}</td>
+                <th>#</th>
+                <th>Domain</th>
+                <th>Score</th>
+                <th>Performance</th>
+                <th>Grade</th>
+                <th>Time Taken</th>
+                <th>Date</th>
               </tr>
-            `
-              )
-              .join('')}
-          </tbody>
-        </table>
-      </div>
-    `;
+            </thead>
+            <tbody>
+              ${attempts
+                .map(
+                  (a, i) => `
+                <tr>
+                  <td style="color: var(--text-muted)">${i + 1}</td>
+                  <td style="font-weight: 600">${escapeHtml(a.domainName || a.domainId?.name || '—')}</td>
+                  <td style="font-family: var(--font-mono)">${a.score} / ${a.totalQuestions}</td>
+                  <td>
+                    <div class="score-bar">
+                      <div class="score-bar-track">
+                        <div class="score-bar-fill" style="width: ${a.percentage}%; background: ${barColor(a.percentage)}"></div>
+                      </div>
+                      <span style="font-size: 0.8rem; color: var(--text-secondary); white-space: nowrap">${a.percentage}%</span>
+                    </div>
+                  </td>
+                  <td><span class="grade-badge ${gradeClass(a.grade)}">${a.grade || 'F'}</span></td>
+                  <td style="color: var(--text-secondary); font-family: var(--font-mono)">${formatTime(a.timeTaken || 0)}</td>
+                  <td style="color: var(--text-muted); font-size: 0.8rem; white-space: nowrap">${formatDate(a.completedAt)}</td>
+                </tr>
+              `
+                )
+                .join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
   } catch (err) {
-    content.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state-icon">⚠️</div>
-        <h3>Error fetching history</h3>
-        <p>${escapeHtml(err.message)}</p>
-      </div>
-    `;
+    if (content) {
+      content.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon">⚠️</div>
+          <h3>Error fetching history</h3>
+          <p>${escapeHtml(err.message)}</p>
+        </div>
+      `;
+    }
     showToast(`History fetch failed: ${err.message}`, 'error');
   }
 }
 
-document.getElementById('btn-search-history').addEventListener('click', () => {
-  const roll = document.getElementById('history-roll-input').value.trim();
+document.getElementById('btn-search-history')?.addEventListener('click', () => {
+  const rollInput = document.getElementById('history-roll-input');
+  const roll = rollInput ? rollInput.value.trim() : '';
   if (!roll) {
     showToast('Please enter a Roll Number', 'error');
-    document.getElementById('history-roll-input').focus();
+    if (rollInput) rollInput.focus();
     return;
   }
   searchHistory(roll.toUpperCase());
 });
 
-document.getElementById('history-roll-input').addEventListener('keydown', (e) => {
+document.getElementById('history-roll-input')?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
-    document.getElementById('btn-search-history').click();
+    document.getElementById('btn-search-history')?.click();
   }
 });
 
@@ -815,16 +960,26 @@ document.getElementById('history-roll-input').addEventListener('keydown', (e) =>
 document.querySelectorAll('.nav-btn[data-view]').forEach((btn) => {
   btn.addEventListener('click', () => {
     const view = btn.dataset.view;
-    if (view === 'quiz' && !state.isQuizActive) return; // don't navigate to quiz via nav
+
+    if (state.isQuizActive) {
+      openModal('confirm-overlay');
+      return;
+    }
+
     if (view === 'history') {
       showView('history');
+      const rollInput = document.getElementById('history-roll-input');
+      if (rollInput && state.rollNumber && !rollInput.value) {
+        rollInput.value = state.rollNumber;
+        searchHistory(state.rollNumber);
+      }
     } else {
       showView('home');
     }
   });
 });
 
-document.getElementById('logo-link').addEventListener('click', (e) => {
+document.getElementById('logo-link')?.addEventListener('click', (e) => {
   e.preventDefault();
   if (state.isQuizActive) {
     openModal('confirm-overlay');
@@ -840,17 +995,27 @@ document.getElementById('logo-link').addEventListener('click', (e) => {
 document.addEventListener('keydown', (e) => {
   if (!state.isQuizActive) return;
 
+  // Don't intercept if an input or textarea is currently focused
+  if (
+    e.target &&
+    (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')
+  ) {
+    return;
+  }
+
   const key = e.key;
 
   // A-F keys to select options
   const optionKeys = { a: 0, b: 1, c: 2, d: 3, e: 4, f: 5 };
   if (optionKeys[key.toLowerCase()] !== undefined && !e.ctrlKey && !e.metaKey) {
-    const target = document.querySelector(`.option-btn[data-option="${optionKeys[key.toLowerCase()]}"]`);
+    const target = document.querySelector(
+      `.option-btn[data-option="${optionKeys[key.toLowerCase()]}"]`
+    );
     if (target) target.click();
     return;
   }
 
-  // Arrow keys for navigation
+  // Arrow keys for question navigation
   if (key === 'ArrowRight' || key === 'ArrowDown') {
     e.preventDefault();
     navigateToQuestion(state.currentQuestionIndex + 1);
@@ -859,30 +1024,38 @@ document.addEventListener('keydown', (e) => {
     navigateToQuestion(state.currentQuestionIndex - 1);
   }
 
-  // Enter to go next
-  if (key === 'Enter' && state.answers[state.currentQuestionIndex] !== undefined) {
+  // Enter to go next or submit
+  if (
+    key === 'Enter' &&
+    state.answers[state.currentQuestionIndex] !== undefined
+  ) {
     const nextBtn = document.getElementById('btn-next');
     const submitBtn = document.getElementById('btn-submit');
-    if (nextBtn.style.display !== 'none') nextBtn.click();
-    else if (submitBtn.style.display !== 'none') submitBtn.click();
+    if (nextBtn && nextBtn.style.display !== 'none') {
+      nextBtn.click();
+    } else if (submitBtn && submitBtn.style.display !== 'none') {
+      submitBtn.click();
+    }
   }
 });
 
 /* ================================================================
-   INIT
+   INITIALIZATION
    ================================================================ */
 
 (async function init() {
-  // Load domains on startup
   await loadDomains();
 
-  // Verify API health
   try {
     const health = await apiFetch('/health');
     if (health.db !== 'connected') {
-      showToast('Database offline — some features may be unavailable', 'error', 5000);
+      showToast(
+        'Offline Mode: Running on mock dataset with full functionality.',
+        'info',
+        4000
+      );
     }
   } catch (_) {
-    // Server health check failure — likely server is down
+    // Health check skipped
   }
 })();

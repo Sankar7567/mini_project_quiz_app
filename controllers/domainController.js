@@ -1,9 +1,19 @@
 const Domain = require('../models/Domain');
+const { isOffline, mockDomains, mockDomainMap } = require('../services/fallbackStore');
 
 // @desc    Get all active domains
 // @route   GET /api/domains
 const getAllDomains = async (req, res, next) => {
   try {
+    if (isOffline()) {
+      return res.status(200).json({
+        success: true,
+        count: mockDomains.length,
+        data: mockDomains,
+        mode: 'offline',
+      });
+    }
+
     const domains = await Domain.find({ isActive: true })
       .sort({ name: 1 })
       .select('-__v');
@@ -14,7 +24,13 @@ const getAllDomains = async (req, res, next) => {
       data: domains,
     });
   } catch (error) {
-    next(error);
+    // If DB error happens, fall back to mock data
+    return res.status(200).json({
+      success: true,
+      count: mockDomains.length,
+      data: mockDomains,
+      mode: 'offline_fallback',
+    });
   }
 };
 
@@ -22,6 +38,20 @@ const getAllDomains = async (req, res, next) => {
 // @route   GET /api/domains/:id
 const getDomainById = async (req, res, next) => {
   try {
+    if (isOffline()) {
+      const domain = mockDomainMap[req.params.id];
+      if (!domain) {
+        return res.status(404).json({
+          success: false,
+          message: 'Domain not found',
+        });
+      }
+      return res.status(200).json({
+        success: true,
+        data: domain,
+      });
+    }
+
     const domain = await Domain.findById(req.params.id).select('-__v');
 
     if (!domain) {
@@ -36,6 +66,12 @@ const getDomainById = async (req, res, next) => {
       data: domain,
     });
   } catch (error) {
+    if (isOffline() || error.name === 'CastError') {
+      const domain = mockDomainMap[req.params.id];
+      if (domain) {
+        return res.status(200).json({ success: true, data: domain });
+      }
+    }
     next(error);
   }
 };

@@ -98,21 +98,31 @@ const quizAttemptSchema = new mongoose.Schema(
   }
 );
 
-// Calculate percentage and grade before saving
+// Calculate percentage and grade before validation and save
+function computePercentageAndGrade(doc) {
+  if (doc.totalQuestions && doc.totalQuestions > 0) {
+    doc.percentage = parseFloat(
+      ((doc.score / doc.totalQuestions) * 100).toFixed(2)
+    );
+
+    const pct = doc.percentage;
+    if (pct >= 95) doc.grade = 'A+';
+    else if (pct >= 85) doc.grade = 'A';
+    else if (pct >= 75) doc.grade = 'B+';
+    else if (pct >= 65) doc.grade = 'B';
+    else if (pct >= 50) doc.grade = 'C';
+    else if (pct >= 35) doc.grade = 'D';
+    else doc.grade = 'F';
+  }
+}
+
+quizAttemptSchema.pre('validate', function (next) {
+  computePercentageAndGrade(this);
+  next();
+});
+
 quizAttemptSchema.pre('save', function (next) {
-  this.percentage = parseFloat(
-    ((this.score / this.totalQuestions) * 100).toFixed(2)
-  );
-
-  const pct = this.percentage;
-  if (pct >= 95) this.grade = 'A+';
-  else if (pct >= 85) this.grade = 'A';
-  else if (pct >= 75) this.grade = 'B+';
-  else if (pct >= 65) this.grade = 'B';
-  else if (pct >= 50) this.grade = 'C';
-  else if (pct >= 35) this.grade = 'D';
-  else this.grade = 'F';
-
+  computePercentageAndGrade(this);
   next();
 });
 

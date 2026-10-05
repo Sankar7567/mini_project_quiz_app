@@ -1,6 +1,31 @@
+const mongoose = require('mongoose');
 const QuizAttempt = require('../models/QuizAttempt');
 const Question = require('../models/Question');
 const Domain = require('../models/Domain');
+const {
+  isOffline,
+  makeObjectId,
+  mockDomainMap,
+  mockQuestionMap,
+  mockAttempts,
+} = require('../services/fallbackStore');
+
+function calculatePercentageAndGrade(score, totalQuestions) {
+  const percentage =
+    totalQuestions > 0
+      ? parseFloat(((score / totalQuestions) * 100).toFixed(2))
+      : 0;
+
+  let grade = 'F';
+  if (percentage >= 95) grade = 'A+';
+  else if (percentage >= 85) grade = 'A';
+  else if (percentage >= 75) grade = 'B+';
+  else if (percentage >= 65) grade = 'B';
+  else if (percentage >= 50) grade = 'C';
+  else if (percentage >= 35) grade = 'D';
+
+  return { percentage, grade };
+}
 
 // @desc    Submit quiz answers & calculate score
 // @route   POST /api/quiz/submit
@@ -23,6 +48,73 @@ const submitQuiz = async (req, res, next) => {
       });
     }
 
+    // ─── OFFLINE FALLBACK MODE ──────────────────────────────────────────────
+    if (isOffline() || !mongoose.Types.ObjectId.isValid(domainId)) {
+      const mockDomain = mockDomainMap[domainId];
+      if (mockDomain || isOffline()) {
+        const domainName = mockDomain ? mockDomain.name : 'Technical Quiz';
+        let score = 0;
+        const gradedAnswers = [];
+
+        for (const answer of answers) {
+          const qId = answer.questionId?.toString();
+          const question = mockQuestionMap[qId];
+          if (!question) continue;
+
+          const selectedIdx =
+            answer.selectedOptionIndex !== undefined
+              ? answer.selectedOptionIndex
+              : -1;
+          const isCorrect = selectedIdx === question.correctOptionIndex;
+
+          if (isCorrect) score += question.points || 1;
+
+          gradedAnswers.push({
+            questionId: question._id,
+            selectedOptionIndex: selectedIdx,
+            isCorrect,
+            correctOptionIndex: question.correctOptionIndex,
+            prompt: question.prompt,
+            options: question.options.map((o) =>
+              typeof o === 'string' ? o : o.text
+            ),
+            explanation: question.explanation || '',
+          });
+        }
+
+        const totalQuestions = gradedAnswers.length;
+        const { percentage, grade } = calculatePercentageAndGrade(
+          score,
+          totalQuestions
+        );
+
+        const attempt = {
+          _id: makeObjectId(5000 + mockAttempts.length + 1),
+          studentName: studentName.trim(),
+          rollNumber: rollNumber.trim().toUpperCase(),
+          domainId: mockDomain ? mockDomain._id : domainId,
+          domainName,
+          score,
+          totalQuestions,
+          percentage,
+          grade,
+          timeTaken: timeTaken || 0,
+          answers: gradedAnswers,
+          completedAt: new Date(),
+        };
+
+        mockAttempts.unshift(attempt);
+
+        return res.status(201).json({
+          success: true,
+          message: 'Quiz submitted successfully',
+          data: attempt,
+          mode: 'offline',
+        });
+      }
+    }
+
+    // ─── MONGODB MODE ────────────────────────────────────────────────────────
     // Verify domain exists
     const domain = await Domain.findById(domainId);
     if (!domain) {
@@ -77,10 +169,18 @@ const submitQuiz = async (req, res, next) => {
         isCorrect,
         correctOptionIndex: question.correctOptionIndex,
         prompt: question.prompt,
-        options: question.options.map((o) => o.text),
+        options: question.options.map((o) =>
+          typeof o === 'string' ? o : o.text
+        ),
         explanation: question.explanation || '',
       });
     }
+
+    const totalQuestions = gradedAnswers.length;
+    const { percentage, grade } = calculatePercentageAndGrade(
+      score,
+      totalQuestions
+    );
 
     // Save attempt to DB
     const attempt = await QuizAttempt.create({
@@ -89,7 +189,9 @@ const submitQuiz = async (req, res, next) => {
       domainId,
       domainName: domain.name,
       score,
-      totalQuestions: gradedAnswers.length,
+      totalQuestions,
+      percentage,
+      grade,
       timeTaken: timeTaken || 0,
       answers: gradedAnswers,
       completedAt: new Date(),
@@ -123,6 +225,57 @@ const getQuizHistory = async (req, res, next) => {
   try {
     const rollNumber = req.params.rollNo.toUpperCase();
 
+    // Offline check
+    if (isOffline()) {
+      const offlineAttempts = mockAttempts.filter(
+        (a) => a.rollNumber === rollNumber
+      );
+
+      if (offlineAttempts.length === 0) {
+        return res.status(200).json({
+          success: true,
+          message: 'No quiz history found for this roll number',
+          count: 0,
+          data: [],
+          stats: null,
+          mode: 'offline',
+        });
+      }
+
+      const totalAttempts = offlineAttempts.length;
+      const avgScore =
+        offlineAttempts.reduce((sum, a) => sum + a.percentage, 0) /
+        totalAttempts;
+      const bestScore = Math.max(...offlineAttempts.map((a) => a.percentage));
+      const uniqueDomains = new Set(offlineAttempts.map((a) => a.domainId)).size;
+
+      return res.status(200).json({
+        success: true,
+        count: totalAttempts,
+        data: offlineAttempts.map((a) => {
+          const dom = mockDomainMap[a.domainId];
+          return {
+            ...a,
+            domainId: dom
+              ? {
+                  _id: dom._id,
+                  name: dom.name,
+                  icon: dom.icon,
+                  color: dom.color,
+                }
+              : a.domainId,
+          };
+        }),
+        stats: {
+          totalAttempts,
+          averagePercentage: parseFloat(avgScore.toFixed(2)),
+          bestPercentage: bestScore,
+          uniqueDomainsAttempted: uniqueDomains,
+        },
+        mode: 'offline',
+      });
+    }
+
     const attempts = await QuizAttempt.find({ rollNumber })
       .sort({ completedAt: -1 })
       .populate('domainId', 'name icon color')
@@ -145,7 +298,7 @@ const getQuizHistory = async (req, res, next) => {
       attempts.reduce((sum, a) => sum + a.percentage, 0) / totalAttempts;
     const bestScore = Math.max(...attempts.map((a) => a.percentage));
     const totalQuizzesCompleted = new Set(
-      attempts.map((a) => a.domainId?._id?.toString())
+      attempts.map((a) => a.domainId?._id?.toString() || a.domainName)
     ).size;
 
     res.status(200).json({
@@ -171,8 +324,44 @@ const getLeaderboard = async (req, res, next) => {
     const { domainId } = req.params;
     const limit = Math.min(parseInt(req.query.limit) || 10, 50);
 
+    if (isOffline() || !mongoose.Types.ObjectId.isValid(domainId)) {
+      const filtered = mockAttempts.filter(
+        (a) => a.domainId === domainId || a.domainName === domainId
+      );
+
+      // Group by roll number (best score)
+      const userMap = {};
+      filtered.forEach((a) => {
+        if (!userMap[a.rollNumber] || userMap[a.rollNumber].bestScore < a.score) {
+          userMap[a.rollNumber] = {
+            _id: a.rollNumber,
+            studentName: a.studentName,
+            rollNumber: a.rollNumber,
+            bestScore: a.score,
+            bestPercentage: a.percentage,
+            bestGrade: a.grade,
+            attempts: 1,
+            lastAttempt: a.completedAt,
+          };
+        } else {
+          userMap[a.rollNumber].attempts++;
+        }
+      });
+
+      const leaderboard = Object.values(userMap)
+        .sort((a, b) => b.bestScore - a.bestScore)
+        .slice(0, limit);
+
+      return res.status(200).json({
+        success: true,
+        count: leaderboard.length,
+        data: leaderboard,
+        mode: 'offline',
+      });
+    }
+
     const leaderboard = await QuizAttempt.aggregate([
-      { $match: { domainId: require('mongoose').Types.ObjectId.createFromHexString(domainId) } },
+      { $match: { domainId: new mongoose.Types.ObjectId(domainId) } },
       {
         $group: {
           _id: '$rollNumber',
@@ -203,6 +392,20 @@ const getLeaderboard = async (req, res, next) => {
 // @route   GET /api/quiz/attempt/:id
 const getAttemptById = async (req, res, next) => {
   try {
+    if (isOffline() || !mongoose.Types.ObjectId.isValid(req.params.id)) {
+      const attempt = mockAttempts.find((a) => a._id === req.params.id);
+      if (!attempt) {
+        return res.status(404).json({
+          success: false,
+          message: 'Attempt not found',
+        });
+      }
+      return res.status(200).json({
+        success: true,
+        data: attempt,
+      });
+    }
+
     const attempt = await QuizAttempt.findById(req.params.id)
       .populate('domainId', 'name icon color')
       .select('-__v');

@@ -1,10 +1,44 @@
 const Question = require('../models/Question');
 const Domain = require('../models/Domain');
+const {
+  isOffline,
+  mockDomainMap,
+  mockQuestions,
+  mockQuestionMap,
+} = require('../services/fallbackStore');
 
 // @desc    Get all questions for a domain
 // @route   GET /api/domains/:id/questions
 const getQuestionsByDomain = async (req, res, next) => {
   try {
+    if (isOffline()) {
+      const domain = mockDomainMap[req.params.id];
+      if (!domain) {
+        return res.status(404).json({
+          success: false,
+          message: 'Domain not found',
+        });
+      }
+
+      const questions = mockQuestions
+        .filter((q) => q.domainId === domain._id && q.isActive)
+        .slice(0, 20)
+        .map((q) => ({
+          _id: q._id,
+          domainId: q.domainId,
+          prompt: q.prompt,
+          options: q.options,
+        }));
+
+      return res.status(200).json({
+        success: true,
+        count: questions.length,
+        domainName: domain.name,
+        data: questions,
+        mode: 'offline',
+      });
+    }
+
     const domain = await Domain.findById(req.params.id);
     if (!domain) {
       return res.status(404).json({
@@ -28,6 +62,28 @@ const getQuestionsByDomain = async (req, res, next) => {
       data: questions,
     });
   } catch (error) {
+    if (isOffline() || error.name === 'CastError') {
+      const domain = mockDomainMap[req.params.id];
+      if (domain) {
+        const questions = mockQuestions
+          .filter((q) => q.domainId === domain._id && q.isActive)
+          .slice(0, 20)
+          .map((q) => ({
+            _id: q._id,
+            domainId: q.domainId,
+            prompt: q.prompt,
+            options: q.options,
+          }));
+
+        return res.status(200).json({
+          success: true,
+          count: questions.length,
+          domainName: domain.name,
+          data: questions,
+          mode: 'offline_fallback',
+        });
+      }
+    }
     next(error);
   }
 };
@@ -36,6 +92,20 @@ const getQuestionsByDomain = async (req, res, next) => {
 // @route   GET /api/questions/:id
 const getQuestionById = async (req, res, next) => {
   try {
+    if (isOffline()) {
+      const q = mockQuestionMap[req.params.id];
+      if (!q) {
+        return res.status(404).json({
+          success: false,
+          message: 'Question not found',
+        });
+      }
+      return res.status(200).json({
+        success: true,
+        data: q,
+      });
+    }
+
     const question = await Question.findById(req.params.id)
       .populate('domainId', 'name')
       .select('-__v');
